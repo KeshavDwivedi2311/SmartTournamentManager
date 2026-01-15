@@ -1,3 +1,4 @@
+
 package com.sports.SmartSport.team.repository;
 
 import com.sports.SmartSport.team.entity.Team;
@@ -18,5 +19,11 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
     @Query("SELECT t FROM Team t WHERE t.tournament.id = :tournamentId AND t.name LIKE %:name%")
     List<Team> findByTournamentIdAndNameContaining(@Param("tournamentId") Long tournamentId, @Param("name") String name);
     boolean existsByNameAndTournamentId(String name, Long tournamentId);
-
+    List<Team> findByPoolIdAndIsActiveTrue(Long poolId);
+    List<Team> findByPoolId(Long poolId);
+    @Query("SELECT t FROM Team t WHERE t.tournament.id = :tournamentId AND t.pool IS NULL")
+    List<Team> findUnassignedTeamsByTournament(@Param("tournamentId") Long tournamentId);
+    @Query("SELECT t FROM Team t WHERE t.pool.id = :poolId AND t.gamesPlayed < :maxGames AND t.isActive = true")
+    List<Team> findActiveTeamsInPool(@Param("poolId") Long poolId, @Param("maxGames") int maxGames);
+    void deleteByPoolId(Long poolId);
 }

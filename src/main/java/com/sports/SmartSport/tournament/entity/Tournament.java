@@ -1,11 +1,15 @@
 package com.sports.SmartSport.tournament.entity;
 
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.sports.SmartSport.team.entity.Team;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "tournaments")
@@ -41,10 +45,24 @@ public class Tournament {
     @Column(name = "created_at")
     private LocalDate createdAt;
 
+    @OneToMany(mappedBy = "tournament", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @JsonManagedReference("tournament-pools")
+    private List<Pool> pools = new ArrayList<>();
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDate.now();
-//        status = "CREATED";
+        if (status == null) {
+            status = "CREATED";
+        }
     }
+    @OneToMany(mappedBy = "tournament", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @JsonManagedReference("tournament-teams") // If you have direct tournament-team relationship
+    private List<Team> teams = new ArrayList<>();
 
+    // Helper method to check if pool name already exists
+    public boolean hasPoolWithName(String poolName) {
+        return pools.stream()
+                .anyMatch(pool -> pool.getName().equalsIgnoreCase(poolName));
+    }
 }

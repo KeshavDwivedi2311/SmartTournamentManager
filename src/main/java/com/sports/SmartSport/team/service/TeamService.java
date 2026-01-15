@@ -1,3 +1,4 @@
+
 package com.sports.SmartSport.team.service;
 
 import com.sports.SmartSport.team.entity.Team;
@@ -62,4 +63,14 @@ public class TeamService {
         return teamRepository.findByTournamentIdAndNameContaining(tournamentId, name);
     }
 
+    public List<Team> getTeamsByPool(Long poolId) {
+        return teamRepository.findByPoolIdAndIsActiveTrue(poolId);
+    }
+
+    public List<Team> getAllTeamsByPool(Long poolId) {
+        return teamRepository.findByPoolId(poolId);
+    }
+    public List<Team> getUnassignedTeams(Long tournamentId) {
+        return teamRepository.findUnassignedTeamsByTournament(tournamentId);
+    }
 }

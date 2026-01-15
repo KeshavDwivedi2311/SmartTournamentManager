@@ -14,7 +14,7 @@ import java.util.Optional;
 
 @RestController
 @RequestMapping("/teams")
-@CrossOrigin(origins = "http://localhost:5173")
+@CrossOrigin(origins = "*")
 public class TeamController {
     @Autowired
     TeamRepository teamRepository;
@@ -36,6 +36,18 @@ public class TeamController {
     public ResponseEntity<List<Team>> getTeamsByTournament(@PathVariable Long tournamentId) {
         try {
             List<Team> teams = teamService.getTeamsByTournament(tournamentId);
+            return ResponseEntity.ok(teams);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
+    }
+
+    // Add endpoint for getting teams by pool
+    @GetMapping("/pool/{poolId}")
+    public ResponseEntity<List<Team>> getTeamsByPool(@PathVariable Long poolId) {
+        try {
+            List<Team> teams = teamService.getTeamsByPool(poolId);
             return ResponseEntity.ok(teams);
         } catch (Exception e) {
             e.printStackTrace();
