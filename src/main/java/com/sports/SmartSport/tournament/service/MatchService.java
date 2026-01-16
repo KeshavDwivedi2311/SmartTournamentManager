@@ -34,14 +34,22 @@ public class MatchService {
     private TeamRepository teamRepository;
 
     public List<MatchDTO> getMatchesByStatus(Long poolId, MatchStatus status) {
-        List<Match> matches = matchRepository.findByPoolIdAndStatusOrderByMatchOrder(poolId, status);
-        return matches.stream().map(this::convertToDTO).collect(Collectors.toList());
+        // Only get LEAGUE matches (exclude knockout matches)
+        List<Match> matches = matchRepository.findPoolMatchesByPoolIdAndStatus(poolId, status);
+        return matches.stream()
+            .sorted((m1, m2) -> Integer.compare(m1.getMatchOrder(), m2.getMatchOrder()))
+            .map(this::convertToDTO)
+            .collect(Collectors.toList());
     }
 
     public List<MatchDTO> getUpcomingMatches(Long poolId) {
         List<MatchStatus> upcomingStatuses = List.of(MatchStatus.SCHEDULED, MatchStatus.READY);
-        List<Match> matches = matchRepository.findByPoolIdAndStatusInOrderByMatchOrder(poolId, upcomingStatuses);
-        return matches.stream().map(this::convertToDTO).collect(Collectors.toList());
+        // Only get LEAGUE matches (exclude knockout matches)
+        List<Match> matches = matchRepository.findPoolMatchesByPoolIdAndStatusIn(poolId, upcomingStatuses);
+        return matches.stream()
+            .sorted((m1, m2) -> Integer.compare(m1.getMatchOrder(), m2.getMatchOrder()))
+            .map(this::convertToDTO)
+            .collect(Collectors.toList());
     }
 
     public List<MatchDTO> getOngoingMatches(Long poolId) {
@@ -53,8 +61,8 @@ public class MatchService {
     }
 
     public List<MatchDTO> getNextMatchesToPlay(Long poolId, int limit) {
-        // Only return matches that are explicitly marked as NEXT status
-        List<Match> matches = matchRepository.findByPoolIdAndStatusOrderByMatchOrder(poolId, MatchStatus.NEXT);
+        // Only return LEAGUE matches that are explicitly marked as NEXT status (exclude knockout matches)
+        List<Match> matches = matchRepository.findPoolMatchesByPoolIdAndStatus(poolId, MatchStatus.NEXT);
         
         // Apply limit if needed (though we expect max 2 anyway)
         if (limit > 0 && matches.size() > limit) {
@@ -312,7 +320,7 @@ public class MatchService {
         long nextMatchesCount = matchRepository.countByPoolIdAndStatus(match.getPool().getId(), MatchStatus.NEXT);
         if (nextMatchesCount >= 2) {
             // Get the names of current NEXT matches for better error message
-            List<Match> currentNextMatches = matchRepository.findByPoolIdAndStatusOrderByMatchOrder(
+            List<Match> currentNextMatches = matchRepository.findPoolMatchesByPoolIdAndStatus(
                 match.getPool().getId(), MatchStatus.NEXT);
         
             String nextMatchesInfo = currentNextMatches.stream()
@@ -393,7 +401,7 @@ public class MatchService {
         long nextMatchesCount = matchRepository.countByPoolIdAndStatus(match.getPool().getId(), MatchStatus.NEXT);
         if (nextMatchesCount >= 2) {
             // Get the names of current NEXT matches for better error message
-            List<Match> currentNextMatches = matchRepository.findByPoolIdAndStatusOrderByMatchOrder(
+            List<Match> currentNextMatches = matchRepository.findPoolMatchesByPoolIdAndStatus(
                 match.getPool().getId(), MatchStatus.NEXT);
             
             String nextMatchesInfo = currentNextMatches.stream()

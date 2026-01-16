@@ -11,6 +11,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.LinkedHashMap;
+import java.util.HashSet;
+import java.util.Set;
+import com.sports.SmartSport.tournament.DTO.CustomPairingRequest;
 
 @Service
 public class KnockoutService {
@@ -70,38 +74,150 @@ public class KnockoutService {
     }
 
     public void generateQualifierMatches(Long tournamentId, int teamsPerPool) {
-        List<TeamDTO> qualifiedTeams = getQualifiedTeams(tournamentId, teamsPerPool);
-
-        if (qualifiedTeams.size() < 2) {
+        // Get qualified teams grouped by pool with their rankings
+        Map<Long, List<TeamDTO>> teamsByPool = getQualifiedTeamsByPool(tournamentId, teamsPerPool);
+        
+        if (teamsByPool.isEmpty() || teamsByPool.values().stream().mapToInt(List::size).sum() < 2) {
             throw new RuntimeException("Need at least 2 qualified teams to generate qualifiers");
         }
 
-        // Create qualifier matches (cross-pool matchups)
         Tournament tournament = tournamentRepository.findById(tournamentId)
             .orElseThrow(() -> new RuntimeException("Tournament not found"));
 
-        // Get the first pool to associate knockout matches with
         Pool firstPool = poolRepository.findByTournamentId(tournamentId).get(0);
 
-        // Shuffle teams for random matchups
-        Collections.shuffle(qualifiedTeams);
+        // Pair teams using proper bracket logic: 1st vs 4th, 2nd vs 3rd from different pools
+        List<Match> qualifierMatches = createQualifierPairings(teamsByPool, teamsPerPool, firstPool);
+        
+        for (Match match : qualifierMatches) {
+            matchRepository.save(match);
+        }
+    }
 
-        int matchOrder = 1;
-        for (int i = 0; i < qualifiedTeams.size(); i += 2) {
-            if (i + 1 < qualifiedTeams.size()) {
-                Match qualifierMatch = new Match();
-                qualifierMatch.setTeam1(teamRepository.findById(qualifiedTeams.get(i).getId()).get());
-                qualifierMatch.setTeam2(teamRepository.findById(qualifiedTeams.get(i + 1).getId()).get());
-                qualifierMatch.setPool(firstPool);
-                qualifierMatch.setMatchType(MatchType.QUALIFIER);
-                qualifierMatch.setMatchName("Qualifier " + ((i / 2) + 1));
-                qualifierMatch.setRoundNumber(1);
-                qualifierMatch.setMatchOrder(matchOrder++);
-                qualifierMatch.setStatus(MatchStatus.SCHEDULED);
+    /**
+     * Get qualified teams grouped by pool with their rankings preserved
+     */
+    private Map<Long, List<TeamDTO>> getQualifiedTeamsByPool(Long tournamentId, int teamsPerPool) {
+        List<Pool> pools = poolRepository.findByTournamentId(tournamentId);
+        Map<Long, List<TeamDTO>> teamsByPool = new LinkedHashMap<>();
 
-                matchRepository.save(qualifierMatch);
+        for (Pool pool : pools) {
+            int poolSize = pool.getTeams().size();
+            int qualifiedCount = Math.min(teamsPerPool, poolSize);
+
+            if (qualifiedCount > 0) {
+                List<Team> poolTeams = getTopTeamsFromPool(pool.getId(), qualifiedCount);
+                List<TeamDTO> teamDTOs = poolTeams.stream()
+                    .map(this::convertTeamToDTO)
+                    .collect(Collectors.toList());
+                teamsByPool.put(pool.getId(), teamDTOs);
             }
         }
+
+        return teamsByPool;
+    }
+
+    /**
+     * Create qualifier pairings using standard tournament bracket logic:
+     * Standard pairing for 4 teams per pool (2 pools):
+     * - Pool A: 1st, 2nd, 3rd, 4th (indices 0, 1, 2, 3)
+     * - Pool B: 1st, 2nd, 3rd, 4th (indices 0, 1, 2, 3)
+     * - Pairings: A1 vs B4, A2 vs B3, B1 vs A4, B2 vs A3
+     * 
+     * Formula: For pool1[i] pair with pool2[teamsPerPool-1-i]
+     * This ensures best teams play weakest qualifiers, creating balanced brackets.
+     */
+    private List<Match> createQualifierPairings(Map<Long, List<TeamDTO>> teamsByPool, int teamsPerPool, Pool firstPool) {
+        List<Match> matches = new ArrayList<>();
+        List<Map.Entry<Long, List<TeamDTO>>> poolEntries = new ArrayList<>(teamsByPool.entrySet());
+        
+        if (poolEntries.size() < 2) {
+            // Single pool: pair sequentially (1st vs 2nd, 3rd vs 4th, etc.)
+            List<TeamDTO> teams = poolEntries.get(0).getValue();
+            int matchOrder = 1;
+            for (int i = 0; i < teams.size(); i += 2) {
+                if (i + 1 < teams.size()) {
+                    matches.add(createQualifierMatch(teams.get(i), teams.get(i + 1), matchOrder++, firstPool));
+                }
+            }
+            return matches;
+        }
+
+        // Multiple pools: Standard bracket pairing
+        // Teams are already sorted by ranking (1st=index0, 2nd=index1, 3rd=index2, 4th=index3)
+        int matchOrder = 1;
+        Set<Long> pairedTeamIds = new HashSet<>();
+        
+        // Pair each pool with every other pool using bracket logic
+        for (int i = 0; i < poolEntries.size(); i++) {
+            List<TeamDTO> pool1Teams = poolEntries.get(i).getValue();
+            
+            for (int j = i + 1; j < poolEntries.size(); j++) {
+                List<TeamDTO> pool2Teams = poolEntries.get(j).getValue();
+                
+                // Standard bracket pairing: 1st vs 4th, 2nd vs 3rd
+                // For each position in pool1, pair with opposite position in pool2
+                int maxPairs = Math.min(pool1Teams.size(), pool2Teams.size());
+                
+                for (int k = 0; k < maxPairs; k++) {
+                    int pool1Index = k; // 0=1st, 1=2nd, 2=3rd, 3=4th
+                    int pool2Index = maxPairs - 1 - k; // 3=4th, 2=3rd, 1=2nd, 0=1st
+                    
+                    if (pool1Index < pool1Teams.size() && pool2Index >= 0 && pool2Index < pool2Teams.size()) {
+                        TeamDTO team1 = pool1Teams.get(pool1Index);
+                        TeamDTO team2 = pool2Teams.get(pool2Index);
+                        
+                        // Avoid duplicate pairings
+                        if (!pairedTeamIds.contains(team1.getId()) && !pairedTeamIds.contains(team2.getId())) {
+                            matches.add(createQualifierMatch(team1, team2, matchOrder++, firstPool));
+                            pairedTeamIds.add(team1.getId());
+                            pairedTeamIds.add(team2.getId());
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Handle any remaining unpaired teams (edge cases with odd numbers)
+        List<TeamDTO> allTeams = new ArrayList<>();
+        for (List<TeamDTO> poolTeams : teamsByPool.values()) {
+            allTeams.addAll(poolTeams);
+        }
+        
+        // Pair remaining unpaired teams from different pools
+        for (int i = 0; i < allTeams.size(); i++) {
+            if (pairedTeamIds.contains(allTeams.get(i).getId())) continue;
+            
+            for (int j = i + 1; j < allTeams.size(); j++) {
+                if (pairedTeamIds.contains(allTeams.get(j).getId())) continue;
+                
+                TeamDTO team1 = allTeams.get(i);
+                TeamDTO team2 = allTeams.get(j);
+                
+                // Only pair if from different pools
+                if (!team1.getPoolId().equals(team2.getPoolId())) {
+                    matches.add(createQualifierMatch(team1, team2, matchOrder++, firstPool));
+                    pairedTeamIds.add(team1.getId());
+                    pairedTeamIds.add(team2.getId());
+                    break;
+                }
+            }
+        }
+        
+        return matches;
+    }
+
+    private Match createQualifierMatch(TeamDTO team1, TeamDTO team2, int matchOrder, Pool pool) {
+        Match qualifierMatch = new Match();
+        qualifierMatch.setTeam1(teamRepository.findById(team1.getId()).get());
+        qualifierMatch.setTeam2(teamRepository.findById(team2.getId()).get());
+        qualifierMatch.setPool(pool);
+        qualifierMatch.setMatchType(MatchType.QUALIFIER);
+        qualifierMatch.setMatchName("Qualifier " + matchOrder);
+        qualifierMatch.setRoundNumber(1);
+        qualifierMatch.setMatchOrder(matchOrder);
+        qualifierMatch.setStatus(MatchStatus.SCHEDULED);
+        return qualifierMatch;
     }
 
     // Keep the original method as a default
@@ -110,12 +226,15 @@ public class KnockoutService {
     }
 
     public void generateSemifinalMatches(Long tournamentId) {
-        // Get completed qualifier matches
+        // Get completed qualifier matches, sorted by match order
         List<Match> qualifierMatches = getCompletedMatchesByType(tournamentId, MatchType.QUALIFIER);
 
         if (qualifierMatches.size() < 2) {
             throw new RuntimeException("Need at least 2 completed qualifier matches to generate semifinals");
         }
+
+        // Sort by match order to ensure proper bracket pairing
+        qualifierMatches.sort((m1, m2) -> Integer.compare(m1.getMatchOrder(), m2.getMatchOrder()));
 
         List<Team> winners = qualifierMatches.stream()
             .map(Match::getWinner)
@@ -128,17 +247,24 @@ public class KnockoutService {
 
         Pool firstPool = poolRepository.findByTournamentId(tournamentId).get(0);
 
-        // Create semifinal matches
-        for (int i = 0; i < winners.size(); i += 2) {
-            if (i + 1 < winners.size()) {
+        // Proper bracket pairing: 1st vs 4th, 2nd vs 3rd
+        // This ensures the best teams don't meet until the final
+        int numWinners = winners.size();
+        int numSemifinals = numWinners / 2;
+        
+        for (int i = 0; i < numSemifinals; i++) {
+            int team1Index = i;
+            int team2Index = numWinners - 1 - i;
+            
+            if (team1Index < team2Index) {
                 Match semifinalMatch = new Match();
-                semifinalMatch.setTeam1(winners.get(i));
-                semifinalMatch.setTeam2(winners.get(i + 1));
+                semifinalMatch.setTeam1(winners.get(team1Index));
+                semifinalMatch.setTeam2(winners.get(team2Index));
                 semifinalMatch.setPool(firstPool);
                 semifinalMatch.setMatchType(MatchType.SEMIFINAL);
-                semifinalMatch.setMatchName("Semifinal " + ((i / 2) + 1));
+                semifinalMatch.setMatchName("Semifinal " + (i + 1));
                 semifinalMatch.setRoundNumber(2);
-                semifinalMatch.setMatchOrder(i / 2 + 1);
+                semifinalMatch.setMatchOrder(i + 1);
                 semifinalMatch.setStatus(MatchStatus.SCHEDULED);
 
                 matchRepository.save(semifinalMatch);
@@ -223,6 +349,80 @@ public class KnockoutService {
         return convertToDTO(savedMatch);
     }
 
+    /**
+     * Create custom qualifier pairings
+     */
+    @Transactional
+    public List<MatchDTO> createCustomQualifierPairings(Long tournamentId, CustomPairingRequest request) {
+        // Delete existing qualifier matches if any
+        List<Match> existingQualifiers = matchRepository.findMatchesByTournamentAndType(tournamentId, MatchType.QUALIFIER);
+        if (!existingQualifiers.isEmpty()) {
+            matchRepository.deleteAll(existingQualifiers);
+        }
+
+        Pool firstPool = poolRepository.findByTournamentId(tournamentId).get(0);
+        List<MatchDTO> createdMatches = new ArrayList<>();
+
+        for (CustomPairingRequest.Pairing pairing : request.getPairings()) {
+            Team team1 = teamRepository.findById(pairing.getTeam1Id())
+                .orElseThrow(() -> new RuntimeException("Team 1 not found: " + pairing.getTeam1Id()));
+            Team team2 = teamRepository.findById(pairing.getTeam2Id())
+                .orElseThrow(() -> new RuntimeException("Team 2 not found: " + pairing.getTeam2Id()));
+
+            Match qualifierMatch = new Match();
+            qualifierMatch.setTeam1(team1);
+            qualifierMatch.setTeam2(team2);
+            qualifierMatch.setPool(firstPool);
+            qualifierMatch.setMatchType(MatchType.QUALIFIER);
+            qualifierMatch.setMatchName(pairing.getMatchName() != null ? pairing.getMatchName() : "Qualifier " + pairing.getMatchOrder());
+            qualifierMatch.setRoundNumber(1);
+            qualifierMatch.setMatchOrder(pairing.getMatchOrder() != null ? pairing.getMatchOrder() : 1);
+            qualifierMatch.setStatus(MatchStatus.SCHEDULED);
+
+            Match savedMatch = matchRepository.save(qualifierMatch);
+            createdMatches.add(convertToDTO(savedMatch));
+        }
+
+        return createdMatches;
+    }
+
+    /**
+     * Create custom semifinal pairings
+     */
+    @Transactional
+    public List<MatchDTO> createCustomSemifinalPairings(Long tournamentId, CustomPairingRequest request) {
+        // Delete existing semifinal matches if any
+        List<Match> existingSemifinals = matchRepository.findMatchesByTournamentAndType(tournamentId, MatchType.SEMIFINAL);
+        if (!existingSemifinals.isEmpty()) {
+            matchRepository.deleteAll(existingSemifinals);
+        }
+
+        Pool firstPool = poolRepository.findByTournamentId(tournamentId).get(0);
+        List<MatchDTO> createdMatches = new ArrayList<>();
+
+        for (CustomPairingRequest.Pairing pairing : request.getPairings()) {
+            Team team1 = teamRepository.findById(pairing.getTeam1Id())
+                .orElseThrow(() -> new RuntimeException("Team 1 not found: " + pairing.getTeam1Id()));
+            Team team2 = teamRepository.findById(pairing.getTeam2Id())
+                .orElseThrow(() -> new RuntimeException("Team 2 not found: " + pairing.getTeam2Id()));
+
+            Match semifinalMatch = new Match();
+            semifinalMatch.setTeam1(team1);
+            semifinalMatch.setTeam2(team2);
+            semifinalMatch.setPool(firstPool);
+            semifinalMatch.setMatchType(MatchType.SEMIFINAL);
+            semifinalMatch.setMatchName(pairing.getMatchName() != null ? pairing.getMatchName() : "Semifinal " + pairing.getMatchOrder());
+            semifinalMatch.setRoundNumber(2);
+            semifinalMatch.setMatchOrder(pairing.getMatchOrder() != null ? pairing.getMatchOrder() : 1);
+            semifinalMatch.setStatus(MatchStatus.SCHEDULED);
+
+            Match savedMatch = matchRepository.save(semifinalMatch);
+            createdMatches.add(convertToDTO(savedMatch));
+        }
+
+        return createdMatches;
+    }
+
     private List<Match> getCompletedMatchesByType(Long tournamentId, MatchType matchType) {
         List<Pool> pools = poolRepository.findByTournamentId(tournamentId);
         List<Long> poolIds = pools.stream().map(Pool::getId).collect(Collectors.toList());
@@ -233,8 +433,8 @@ public class KnockoutService {
 
 
     private List<Team> getTopTeamsFromPool(Long poolId, int count) {
-        // Get completed matches for this pool
-        List<Match> poolMatches = matchRepository.findByPoolIdAndStatus(poolId, MatchStatus.COMPLETED);
+        // Get completed LEAGUE matches for this pool (exclude knockout matches)
+        List<Match> poolMatches = matchRepository.findPoolMatchesByPoolIdAndStatus(poolId, MatchStatus.COMPLETED);
 
         // Get all teams in the pool
         Pool pool = poolRepository.findById(poolId)
@@ -323,8 +523,8 @@ public class KnockoutService {
 
     // Add a method to get full standings (for pool standings API)
     public List<TeamStandingDTO> getPoolStandingsFromKnockoutService(Long poolId) {
-        // Get completed matches for this pool
-        List<Match> poolMatches = matchRepository.findByPoolIdAndStatus(poolId, MatchStatus.COMPLETED);
+        // Get completed LEAGUE matches for this pool (exclude knockout matches)
+        List<Match> poolMatches = matchRepository.findPoolMatchesByPoolIdAndStatus(poolId, MatchStatus.COMPLETED);
 
         // Get all teams in the pool
         Pool pool = poolRepository.findById(poolId)

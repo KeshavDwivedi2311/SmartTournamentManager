@@ -4,6 +4,7 @@ package com.sports.SmartSport.tournament.controller;
 import com.sports.SmartSport.tournament.service.KnockoutService;
 import com.sports.SmartSport.tournament.DTO.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
@@ -78,6 +79,36 @@ public class KnockoutController {
         try {
             MatchDTO match = knockoutService.createCustomMatch(tournamentId, request);
             return ResponseEntity.ok(match);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/{tournamentId}/custom-qualifier-pairings")
+    public ResponseEntity<?> createCustomQualifierPairings(
+            @PathVariable Long tournamentId,
+            @RequestBody CustomPairingRequest request) {
+        try {
+            List<MatchDTO> matches = knockoutService.createCustomQualifierPairings(tournamentId, request);
+            return ResponseEntity.ok(Map.of(
+                "message", "Custom qualifier pairings created successfully",
+                "matches", matches
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/{tournamentId}/custom-semifinal-pairings")
+    public ResponseEntity<?> createCustomSemifinalPairings(
+            @PathVariable Long tournamentId,
+            @RequestBody CustomPairingRequest request) {
+        try {
+            List<MatchDTO> matches = knockoutService.createCustomSemifinalPairings(tournamentId, request);
+            return ResponseEntity.ok(Map.of(
+                "message", "Custom semifinal pairings created successfully",
+                "matches", matches
+            ));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }

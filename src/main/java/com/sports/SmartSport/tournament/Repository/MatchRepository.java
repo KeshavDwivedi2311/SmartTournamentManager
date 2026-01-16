@@ -47,6 +47,16 @@ public interface MatchRepository extends JpaRepository<Match, Long> {
 
     List<Match> findByPoolIdAndStatus(Long poolId, MatchStatus matchStatus);
 
+    // Get only pool/league matches (exclude knockout matches)
+    @Query("SELECT m FROM Match m WHERE m.pool.id = :poolId AND m.status = :status AND (m.matchType = 'LEAGUE' OR m.matchType IS NULL)")
+    List<Match> findPoolMatchesByPoolIdAndStatus(@Param("poolId") Long poolId, @Param("status") MatchStatus matchStatus);
+
+    @Query("SELECT m FROM Match m WHERE m.pool.id = :poolId AND m.status IN :statuses AND (m.matchType = 'LEAGUE' OR m.matchType IS NULL)")
+    List<Match> findPoolMatchesByPoolIdAndStatusIn(@Param("poolId") Long poolId, @Param("statuses") List<MatchStatus> statuses);
+
+    @Query("SELECT m FROM Match m WHERE m.pool.id = :poolId AND (m.matchType = 'LEAGUE' OR m.matchType IS NULL) ORDER BY m.matchOrder")
+    List<Match> findPoolMatchesByPoolId(@Param("poolId") Long poolId);
+
     // Get matches by tournament and match type
     @Query("SELECT m FROM Match m WHERE m.pool.tournament.id = :tournamentId AND m.matchType = :matchType")
     List<Match> findMatchesByTournamentAndType(@Param("tournamentId") Long tournamentId, @Param("matchType") MatchType matchType);

@@ -429,7 +429,8 @@ public class TournamentService {
         Pool pool = poolRepository.findById(poolId)
                 .orElseThrow(() -> new RuntimeException("Pool not found with id: " + poolId));
 
-        List<Match> matches = matchRepository.findByPoolId(poolId);
+        // Only get LEAGUE matches (exclude knockout matches)
+        List<Match> matches = matchRepository.findPoolMatchesByPoolId(poolId);
 
         // Check if any matches are completed
         boolean hasCompletedMatches = matches.stream()
