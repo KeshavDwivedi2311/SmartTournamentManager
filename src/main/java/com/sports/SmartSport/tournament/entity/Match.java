@@ -68,6 +68,11 @@ public class Match {
     @Column(name = "round_number")
     private Integer roundNumber; // For tracking knockout rounds
 
+    // Optimistic locking version field - prevents concurrent update conflicts
+    @Version
+    @Column(name = "version")
+    private Long version = 0L;
+
     public Match(Team team1, Team team2, Pool pool, int matchOrder) {
         this.team1 = team1;
         this.team2 = team2;

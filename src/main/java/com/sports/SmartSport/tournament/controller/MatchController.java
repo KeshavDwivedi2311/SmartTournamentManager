@@ -6,9 +6,6 @@ import com.sports.SmartSport.tournament.DTO.MatchUpdateRequest;
 import com.sports.SmartSport.tournament.entity.MatchStatus;
 import com.sports.SmartSport.tournament.service.MatchService;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -26,6 +23,18 @@ public class MatchController {
 
     @Autowired
     private MatchService matchManagementService;
+
+    @Operation(summary = "Get match by ID", description = "Get a single match by its ID")
+    @GetMapping("/{matchId}")
+    public ResponseEntity<?> getMatchById(@PathVariable Long matchId) {
+        try {
+            MatchDTO match = matchManagementService.getMatchById(matchId);
+            return ResponseEntity.ok(match);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
 
     @Operation(summary = "Get upcoming matches", description = "Get all scheduled and ready matches for a pool")
     @GetMapping("/pools/{poolId}/upcoming")

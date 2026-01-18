@@ -33,5 +33,10 @@ public class MatchDTO {
     private MatchType matchType;
     private String matchName;
     private Integer roundNumber;
+    private Long version; // Optimistic locking version
+    
+    // Timer information
+    private Long elapsedSeconds; // Elapsed time in seconds (calculated on backend)
+    private Integer targetPoints; // Target points for this match (based on match type)
 
 }

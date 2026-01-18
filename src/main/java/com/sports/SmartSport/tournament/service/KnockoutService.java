@@ -31,6 +31,9 @@ public class KnockoutService {
     @Autowired
     private PoolRepository poolRepository;
 
+    @Autowired
+    private TournamentConfigService tournamentConfigService;
+
     public Map<String, List<MatchDTO>> getKnockoutMatches(Long tournamentId) {
         Map<String, List<MatchDTO>> knockoutData = new HashMap<>();
 
@@ -68,9 +71,14 @@ public class KnockoutService {
         return qualifiedTeams.stream().map(this::convertTeamToDTO).collect(Collectors.toList());
     }
 
-    // Keep the original method as a default (uses 2 teams per pool)
+    // Keep the original method - uses configurable qualifiers per pool from TournamentConfig
     public List<TeamDTO> getQualifiedTeams(Long tournamentId) {
-        return getQualifiedTeams(tournamentId, 2); // Default to 2 teams per pool
+        // Get qualifiers per pool from tournament config
+        TournamentConfig config = tournamentConfigService.getConfig(tournamentId);
+        int qualifiersPerPool = config != null && config.getQualifiersPerPool() != null 
+            ? config.getQualifiersPerPool() 
+            : 4; // Default to 4
+        return getQualifiedTeams(tournamentId, qualifiersPerPool);
     }
 
     public void generateQualifierMatches(Long tournamentId, int teamsPerPool) {

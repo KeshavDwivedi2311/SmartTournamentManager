@@ -7,14 +7,17 @@ import com.sports.SmartSport.tournament.DTO.MatchDTO;
 import com.sports.SmartSport.tournament.DTO.MatchUpdateRequest;
 import com.sports.SmartSport.tournament.DTO.BulkMatchUpdateRequest;
 import com.sports.SmartSport.tournament.Repository.MatchRepository;
-import com.sports.SmartSport.tournament.Repository.PoolRepository;
+import com.sports.SmartSport.tournament.Repository.TournamentConfigRepository;
 import com.sports.SmartSport.tournament.entity.Match;
 import com.sports.SmartSport.tournament.entity.MatchStatus;
+import com.sports.SmartSport.tournament.entity.MatchType;
+import com.sports.SmartSport.tournament.entity.TournamentConfig;
+import java.time.Duration;
+import java.time.LocalDateTime;
 import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
@@ -28,10 +31,19 @@ public class MatchService {
     private MatchRepository matchRepository;
 
     @Autowired
-    private PoolRepository poolRepository;
+    private TeamRepository teamRepository;
 
     @Autowired
-    private TeamRepository teamRepository;
+    private TournamentConfigRepository tournamentConfigRepository;
+
+    /**
+     * Get a single match by ID
+     */
+    public MatchDTO getMatchById(Long matchId) {
+        Match match = matchRepository.findById(matchId)
+                .orElseThrow(() -> new RuntimeException("Match not found with ID: " + matchId));
+        return convertToDTO(match);
+    }
 
     public List<MatchDTO> getMatchesByStatus(Long poolId, MatchStatus status) {
         // Only get LEAGUE matches (exclude knockout matches)
@@ -102,11 +114,6 @@ public class MatchService {
         }
 
         match = matchRepository.save(match);
-        
-        // Log for debugging
-        System.out.println("Match " + matchId + " started. Status changed from " + 
-            match.getStatus() + " to ONGOING on court " + courtNumber);
-        
         return convertToDTO(match);
     }
 
@@ -114,8 +121,9 @@ public class MatchService {
         Match match = matchRepository.findById(matchId)
                 .orElseThrow(() -> new RuntimeException("Match not found"));
 
-        if (match.getStatus() != MatchStatus.ONGOING) {
-            throw new RuntimeException("Only ongoing matches can be completed");
+        // Allow completion from ONGOING or re-completion of already COMPLETED matches
+        if (match.getStatus() != MatchStatus.ONGOING && match.getStatus() != MatchStatus.COMPLETED) {
+            throw new RuntimeException("Only ongoing or completed matches can be completed. Current status: " + match.getStatus());
         }
 
         // Validate scores
@@ -447,6 +455,51 @@ public class MatchService {
             dto.setWinnerName(match.getWinner().getName());
         }
 
+        dto.setMatchType(match.getMatchType());
+        dto.setMatchName(match.getMatchName());
+        dto.setRoundNumber(match.getRoundNumber());
+        dto.setVersion(match.getVersion()); // Include version for optimistic locking
+        
+        // Calculate elapsed time for ongoing matches
+        if (match.getStatus() == MatchStatus.ONGOING && match.getStartTime() != null) {
+            LocalDateTime now = LocalDateTime.now();
+            Duration duration = Duration.between(match.getStartTime(), now);
+            dto.setElapsedSeconds(duration.getSeconds());
+        } else if (match.getStatus() == MatchStatus.COMPLETED && match.getStartTime() != null && match.getEndTime() != null) {
+            Duration duration = Duration.between(match.getStartTime(), match.getEndTime());
+            dto.setElapsedSeconds(duration.getSeconds());
+        } else {
+            dto.setElapsedSeconds(0L);
+        }
+        
+        // Set target points based on match type and tournament config
+        Integer targetPoints = getTargetPointsForMatch(match);
+        dto.setTargetPoints(targetPoints);
+        
         return dto;
+    }
+    
+    /**
+     * Get target points for a match based on match type and tournament configuration
+     */
+    private Integer getTargetPointsForMatch(Match match) {
+        try {
+            Long tournamentId = match.getPool().getTournament().getId();
+            TournamentConfig config = tournamentConfigRepository.findByTournamentId(tournamentId)
+                    .orElse(null);
+            
+            if (config != null) {
+                MatchType matchType = match.getMatchType() != null ? match.getMatchType() : MatchType.LEAGUE;
+                return config.getPointsForMatchType(matchType);
+            }
+            
+            // Default values if no config found
+            MatchType matchType = match.getMatchType() != null ? match.getMatchType() : MatchType.LEAGUE;
+            return matchType == MatchType.LEAGUE ? 15 : 21;
+        } catch (Exception e) {
+            // Fallback to defaults
+            MatchType matchType = match.getMatchType() != null ? match.getMatchType() : MatchType.LEAGUE;
+            return matchType == MatchType.LEAGUE ? 15 : 21;
+        }
     }
 }

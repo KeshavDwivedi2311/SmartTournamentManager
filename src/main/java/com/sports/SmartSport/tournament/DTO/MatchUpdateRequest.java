@@ -15,4 +15,5 @@ public class MatchUpdateRequest {
     private Long winnerId;
     private String notes;
     private String courtNumber;
+    private Long version; // Optimistic locking version - must match current version
 }
