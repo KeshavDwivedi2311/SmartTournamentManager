@@ -7,7 +7,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -40,13 +39,33 @@ public class KnockoutController {
         }
     }
 
+    /**
+     * NEW: Flexible qualifier generation with request body.
+     * Supports per-pool qualifier counts, pool selection, and pairing strategies.
+     */
     @PostMapping("/{tournamentId}/generate-qualifiers")
     public ResponseEntity<?> generateQualifiers(
             @PathVariable Long tournamentId,
-            @RequestParam(defaultValue = "2") int teamsPerPool) {
+            @RequestBody(required = false) QualifierGenerationRequest request,
+            @RequestParam(required = false) Integer teamsPerPool) {
         try {
-            knockoutService.generateQualifierMatches(tournamentId, teamsPerPool);
+            // If no request body provided, build one from query params (backward compat)
+            if (request == null) {
+                request = new QualifierGenerationRequest();
+                request.setTeamsPerPool(teamsPerPool != null ? teamsPerPool : 2);
+            }
+            knockoutService.generateQualifierMatches(tournamentId, request);
             return ResponseEntity.ok(Map.of("message", "Qualifier matches generated successfully"));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/{tournamentId}/generate-quarterfinals")
+    public ResponseEntity<?> generateQuarterfinals(@PathVariable Long tournamentId) {
+        try {
+            knockoutService.generateQuarterfinalMatches(tournamentId);
+            return ResponseEntity.ok(Map.of("message", "Quarterfinal matches generated successfully"));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
@@ -120,6 +139,19 @@ public class KnockoutController {
             int deletedCount = knockoutService.deleteQualifierMatches(tournamentId);
             return ResponseEntity.ok(Map.of(
                 "message", "Qualifier matches deleted successfully",
+                "deletedMatches", deletedCount
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @DeleteMapping("/{tournamentId}/knockout/quarterfinals")
+    public ResponseEntity<?> deleteQuarterfinalMatches(@PathVariable Long tournamentId) {
+        try {
+            int deletedCount = knockoutService.deleteQuarterfinalMatches(tournamentId);
+            return ResponseEntity.ok(Map.of(
+                "message", "Quarterfinal matches deleted successfully",
                 "deletedMatches", deletedCount
             ));
         } catch (Exception e) {

@@ -34,32 +34,49 @@ public class TournamentScheduleService {
      * Get tournament schedule status
      */
     public TournamentScheduleStatusDTO getScheduleStatus(Long tournamentId) {
-        TournamentConfig config = configService.getConfig(tournamentId);
+        TournamentConfig config = null;
+        try {
+            config = configService.getConfig(tournamentId);
+        } catch (Exception e) {
+            // If config can't be loaded, return a minimal status
+            TournamentScheduleStatusDTO fallback = new TournamentScheduleStatusDTO();
+            fallback.setTotalMatches(0);
+            fallback.setCompletedMatches(0);
+            fallback.setOngoingMatches(0);
+            fallback.setRemainingMatches(0);
+            fallback.setCompletionPercentage(0);
+            fallback.setTournamentStarted(false);
+            fallback.setExpectedCompletedMatches(0);
+            fallback.setCourtTimeRemainingMinutes(0);
+            return fallback;
+        }
         
         // Get all matches (pool and knockout) for the tournament
-        // This query gets matches from all pools in the tournament, including all match types
         List<Pool> pools = poolRepository.findByTournamentId(tournamentId);
+        if (pools == null) pools = new ArrayList<>();
         List<Long> poolIds = pools.stream().map(Pool::getId).collect(Collectors.toList());
         
         // Get ALL matches (league + knockout) by getting matches from all pools
         List<Match> allMatches = new ArrayList<>();
         for (Long poolId : poolIds) {
             List<Match> poolMatches = matchRepository.findByPoolId(poolId);
-            allMatches.addAll(poolMatches);
+            if (poolMatches != null) {
+                allMatches.addAll(poolMatches);
+            }
         }
         
         // Count matches by status
         long totalMatches = allMatches.size();
         long completedMatches = allMatches.stream()
-                .filter(m -> m.getStatus() == MatchStatus.COMPLETED)
+                .filter(m -> m != null && m.getStatus() == MatchStatus.COMPLETED)
                 .count();
         long ongoingMatches = allMatches.stream()
-                .filter(m -> m.getStatus() == MatchStatus.ONGOING)
+                .filter(m -> m != null && m.getStatus() == MatchStatus.ONGOING)
                 .count();
         long remainingMatches = totalMatches - completedMatches;
         
         // Calculate estimated vs actual time
-        LocalDateTime tournamentStart = config.getTournamentStartTime();
+        LocalDateTime tournamentStart = config != null ? config.getTournamentStartTime() : null;
         LocalDateTime now = LocalDateTime.now();
         
         // Check if tournament has started
@@ -74,13 +91,12 @@ public class TournamentScheduleService {
             actualElapsedMinutes = elapsed.toMinutes();
             
             // Calculate how many matches should have been completed by now
-            // Based on court schedule and elapsed time
-            long expectedCompletedMatches = calculateExpectedCompletedMatches(config, allMatches, actualElapsedMinutes);
+            long expectedCompleted = calculateExpectedCompletedMatches(config, allMatches, actualElapsedMinutes);
             
-            // Matches difference: positive = behind (completed fewer than expected), negative = ahead (completed more than expected)
-            long matchesDiff = expectedCompletedMatches - completedMatches;
-            timeDifferenceMinutes = (int) Math.abs(matchesDiff);
-            isAhead = matchesDiff < 0; // Negative means ahead (completed more than expected)
+            // Matches difference
+            long matchesDiff = expectedCompleted - completedMatches;
+            timeDifferenceMinutes = Math.abs(matchesDiff);
+            isAhead = matchesDiff < 0;
         }
         
         long timeDifferenceAbs = Math.abs(timeDifferenceMinutes);
@@ -88,10 +104,9 @@ public class TournamentScheduleService {
         // Calculate estimated time remaining
         long estimatedRemainingMinutes = 0;
         if (remainingMatches > 0) {
-            // Average time per match based on completed matches
             long avgMatchDuration = calculateAverageMatchDuration(completedMatches, allMatches);
             if (avgMatchDuration == 0) {
-                avgMatchDuration = config.getEstimatedMatchDurationMinutes() != null 
+                avgMatchDuration = (config != null && config.getEstimatedMatchDurationMinutes() != null) 
                     ? config.getEstimatedMatchDurationMinutes() 
                     : 15;
             }
@@ -106,9 +121,8 @@ public class TournamentScheduleService {
         }
         
         // Calculate court booking end time (from config or derive from schedule)
-        LocalDateTime courtBookingEnd = config.getCourtBookingEndTime();
-        if (courtBookingEnd == null && tournamentStart != null) {
-            // Calculate from court schedule - last slot + 1 hour
+        LocalDateTime courtBookingEnd = config != null ? config.getCourtBookingEndTime() : null;
+        if (courtBookingEnd == null && tournamentStart != null && config != null) {
             courtBookingEnd = calculateCourtBookingEndTime(config, tournamentStart);
         }
         
@@ -142,14 +156,14 @@ public class TournamentScheduleService {
      * Properly parses the court schedule JSON and calculates based on actual court availability per time slot
      */
     private long calculateExpectedCompletedMatches(TournamentConfig config, List<Match> allMatches, long elapsedMinutes) {
-        if (config.getTournamentStartTime() == null) {
+        if (config == null || config.getTournamentStartTime() == null) {
             return 0;
         }
         
-        int matchDuration = config.getEstimatedMatchDurationMinutes() != null 
+        int matchDuration = (config.getEstimatedMatchDurationMinutes() != null && config.getEstimatedMatchDurationMinutes() > 0)
             ? config.getEstimatedMatchDurationMinutes() 
             : 15;
-        int breakTime = config.getBreakTimeMinutes() != null 
+        int breakTime = (config.getBreakTimeMinutes() != null && config.getBreakTimeMinutes() >= 0)
             ? config.getBreakTimeMinutes() 
             : 2;
         

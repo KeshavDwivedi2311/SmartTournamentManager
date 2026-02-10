@@ -32,7 +32,6 @@ public class Match {
     private Pool pool;
 
     private LocalDateTime scheduledTime;
-    private boolean isCompleted = false;
     private int matchOrder;
 
     @Enumerated(EnumType.STRING)
@@ -69,8 +68,9 @@ public class Match {
     private Integer roundNumber; // For tracking knockout rounds
 
     // Optimistic locking version field - prevents concurrent update conflicts
+    // Note: "version" is a reserved function name in H2 2.x, so we use "match_version"
     @Version
-    @Column(name = "version")
+    @Column(name = "match_version")
     private Long version = 0L;
 
     public Match(Team team1, Team team2, Pool pool, int matchOrder) {
